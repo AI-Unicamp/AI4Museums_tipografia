@@ -443,25 +443,23 @@ def run_cross_validation(df, n_folds=5):
 
     all_results = []
 
-    for val_fold in range(n_folds):
+    for test_fold in range(n_folds):
 
+        val_fold = (test_fold + 1) % n_folds
+        
         fold_results = run_fold(
             df,
+            test_fold=test_fold,
             val_fold=val_fold
         )
 
-        fold_results["Fold"] = val_fold
-
+        fold_results["Test_Fold"] = test_fold
+        fold_results["Val_Fold"] = val_fold
         all_results.append(fold_results)
 
-    results = pd.concat(
-        all_results,
-        ignore_index=True
-    )
+    results = pd.concat(all_results, ignore_index=True)
 
-    results.to_csv(
-        "cross_validation_results.csv",
-        index=False
+    results.to_csv("cross_validation_results.csv", index=False
     )
 
     summary = (
@@ -471,10 +469,7 @@ def run_cross_validation(df, n_folds=5):
     .round(4)
     )
 
-    summary.columns = [
-    f"{metric}_{stat}"
-    for metric, stat in summary.columns
-    ]
+    summary.columns = [f"{metric}_{stat}" for metric, stat in summary.columns]
 
     print("\n===== MÉDIAS DOS 5 FOLDS =====")
     print(summary)
@@ -486,7 +481,7 @@ def run_cross_validation(df, n_folds=5):
 def run_fold(df, val_fold, test_fold=-1):
 
     print(f"\n{'='*70}")
-    print(f"VALIDATION FOLD {val_fold}")
+    print(f"ITERATION -> TEST FOLD: {test_fold} | VAL FOLD: {val_fold}")
     print(f"{'='*70}")
 
     train_df = df[
@@ -503,6 +498,7 @@ def run_fold(df, val_fold, test_fold=-1):
             # Para testes e modelos sem augmentation
     g = torch.Generator()
     g.manual_seed(SEED)
+
     loader_base_train = DataLoader(
         TypographyDataset(train_df, transform=base_transform),
         batch_size=32,
@@ -608,7 +604,7 @@ def run_fold(df, val_fold, test_fold=-1):
         train_time=train_time
     )
     # --- CONFRONTO FINAL ---
-    return evaluate_all_models(y_true_test, model_preds, class_names, save_prefix=f"fold_{val_fold}")
+    return evaluate_all_models(y_true_test, model_preds, class_names, save_prefix=f"test_fold{test_fold}")
 
 
 if __name__ == "__main__":
