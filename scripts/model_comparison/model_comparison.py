@@ -300,7 +300,7 @@ def evaluate(model, loader, criterion):
 # 4. AVALIAÇÃO E GERAÇÃO DOS GRÁFICOS (PARA O LATEX)
 # =========================================================
 def evaluate_all_models(y_true, predictions_dict, class_names, save_prefix=""):
-    
+
     print("\n" + "=" * 60)
     print("GERANDO RESULTADOS COMPARATIVOS")
     print("=" * 60)
