@@ -131,9 +131,7 @@ def train_dl_model(config_name, train_loader, val_loader, num_classes=4, epochs=
         num_ftrs = model.fc.in_features
         model.fc = nn.Linear(num_ftrs, num_classes)
         
-        # LR baseado na sua especificação
-        lr = 0.0001 if "Augmentation" in config_name else 0.001
-        optimizer = optim.Adam(model.parameters(), lr=lr)
+        optimizer = optim.Adam(model.parameters(), lr=0.001)
         
     elif "EfficientNet" in config_name:
         model = efficientnet_b0(weights=EfficientNet_B0_Weights.DEFAULT)
@@ -141,7 +139,7 @@ def train_dl_model(config_name, train_loader, val_loader, num_classes=4, epochs=
         model.classifier[1] = nn.Linear(num_ftrs, num_classes)
         
         # Conforme seu código: lr 0.0001 com weight_decay
-        optimizer = optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-4)
+        optimizer = optim.Adam(model.parameters(), lr=0.001)
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.1, patience=2)
 
@@ -551,7 +549,7 @@ def run_fold(df, val_fold, test_fold=-1):
         train_time=train_time
     )
     print("Treinando XGBoost...")
-    xgb = XGBClassifier(n_estimators=100, learning_rate=0.1, max_depth=6, random_state=42, n_jobs=-1)
+    xgb = XGBClassifier(n_estimators=100, learning_rate=0.001, max_depth=6, random_state=42, n_jobs=-1)
     start = time.perf_counter()
     xgb.fit(X_train, y_train)
     train_time = time.perf_counter() - start
@@ -565,7 +563,7 @@ def run_fold(df, val_fold, test_fold=-1):
     )
     # --- 3. RESNET-18 (SEM AUG, 10 ÉPOCAS) ---
     print("\n--- INICIANDO DEEP LEARNING ---")
-    res_base, train_time = train_dl_model('3. ResNet-18 (Base)', loader_base_train, loader_val, epochs=10)
+    res_base, train_time = train_dl_model('3. ResNet-18 (Base)', loader_base_train, loader_val, epochs=30)
     model_preds["3. ResNet-18 (Base)"] = evaluate_model(
         res_base,
         None,
@@ -587,7 +585,7 @@ def run_fold(df, val_fold, test_fold=-1):
         train_time=train_time
     )
     # --- 5. EFFICIENTNET-B0 (SEM AUG, 10 ÉPOCAS) ---
-    eff_base, train_time = train_dl_model('5. EfficientNet (Base)', loader_base_train, loader_val, epochs=10)
+    eff_base, train_time = train_dl_model('5. EfficientNet (Base)', loader_base_train, loader_val, epochs=30)
     model_preds["5. EfficientNet (Base)"] = evaluate_model(
         eff_base,
         None,
@@ -599,7 +597,7 @@ def run_fold(df, val_fold, test_fold=-1):
     )
     # --- 6. EFFICIENTNET-B0 (COM AUG, 40 ÉPOCAS) ---
     # Assumi 40 épocas para igualar com a ResNet com augmentation
-    eff_aug, train_time = train_dl_model('6. EfficientNet (Aug)', loader_aug_train, loader_val, epochs=40)
+    eff_aug, train_time = train_dl_model('6. EfficientNet (Aug)', loader_aug_train, loader_val, epochs=45)
     model_preds["6. EfficientNet (Aug)"] = evaluate_model(
         eff_aug,
         None,
