@@ -545,7 +545,7 @@ def run_fold(df, val_fold, test_fold=-1):
         train_time=train_time
     )
     print("Treinando XGBoost...")
-    xgb = XGBClassifier(n_estimators=100, learning_rate=0.001, max_depth=6, random_state=42, n_jobs=-1)
+    xgb = XGBClassifier(n_estimators=100, learning_rate=0.1, max_depth=6, random_state=42, n_jobs=-1)
     start = time.perf_counter()
     xgb.fit(X_train, y_train)
     train_time = time.perf_counter() - start

@@ -1,8 +1,0 @@
-,precision,recall,f1-score,support
-escritural,0.6518,0.7766,0.7087,94.0
-fantasia,0.0,0.0,0.0,0.0
-grotesco,0.6406,0.8255,0.7214,149.0
-serifado,0.3684,0.0875,0.1414,80.0
-accuracy,0.6285,0.6285,0.6285,0.6285
-macro avg,0.4152,0.4224,0.3929,323.0
-weighted avg,0.5765,0.6285,0.5741,323.0
