@@ -1,5 +1,6 @@
 import time
 import cv2
+from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -299,12 +300,15 @@ def evaluate(model, loader, criterion):
 # 4. AVALIAÇÃO E GERAÇÃO DOS GRÁFICOS (PARA O LATEX)
 # =========================================================
 def evaluate_all_models(y_true, predictions_dict, class_names, save_prefix=""):
-
+    
     print("\n" + "=" * 60)
     print("GERANDO RESULTADOS COMPARATIVOS")
     print("=" * 60)
 
-    save_prefix = "../../results/" + save_prefix
+    results_dir = Path("../../results")
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    save_prefix = results_dir / save_prefix
 
     results = []
     for model_name, result in predictions_dict.items():
