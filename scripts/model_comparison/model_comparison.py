@@ -237,7 +237,7 @@ def evaluate_model(model, X_test, class_names, y_test, model_type="sklearn", tes
     report = classification_report(
         y_test,
         y_pred,
-	labels=np.arange(len(class_names)),
+	    labels=np.arange(len(class_names)),
         target_names=class_names,
         output_dict=True,
         zero_division=0
