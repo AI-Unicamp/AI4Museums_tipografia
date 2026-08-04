@@ -15,6 +15,7 @@ from torchvision import transforms, models
 from torchvision.models import resnet18, ResNet18_Weights
 from torchvision.models import efficientnet_b0, EfficientNet_B0_Weights
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import LabelEncoder
 from xgboost import XGBClassifier
 from sklearn.metrics import accuracy_score, f1_score, recall_score, classification_report, confusion_matrix
 from tqdm import tqdm
@@ -206,12 +207,20 @@ def compare_models(y_true, predictions_dict, class_names):
 # 5. EXECUÇÃO PRINCIPAL
 # =========================================================
 if __name__ == "__main__":
-    SPLITS_CSV_PATH = "seu_arquivo_splits.csv" # Mude para o nome correto
+    SPLITS_CSV_PATH = "../../data/k-fold_split/typography_dataset_splits_local.csv" # Mude para o nome correto
     
     # Carregando dados
     df = pd.read_csv(SPLITS_CSV_PATH)
-    train_df = df[df['split'] != 'test'].copy() 
-    test_df = df[df['split'] == 'test'].copy()
+
+    le = LabelEncoder()
+
+    df['label_encoded'] = le.fit_transform(df['label'])
+    
+    # Treino: Tudo que NÃO for -1 (ou seja, os folds 0, 1, 2, 3 e 4)
+    train_df = df[df['fold'] != -1].copy()
+    
+    # Teste: Exatamente onde o fold é -1
+    test_df = df[df['fold'] == -1].copy()
     
     classes_names = sorted(['grotesco', 'serifado', 'escritural', 'fantasia'])
     
