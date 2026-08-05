@@ -370,6 +370,89 @@ def train_dl_model(config_name, train_loader, val_loader, num_classes=4, epochs=
 
 def run_final_test(df):
     print("\n" + "=" * 70)
+    print("TREINAMENTO FINAL (HOLD-OUT SPLIT SIMPLES)")
+    print("=" * 70)
+
+    class_names = sorted(df["label"].unique())
+
+    # 1. Separar o Conjunto de Teste Inicial (ex: 15% dos dados)
+    train_val_df, test_df = train_test_split(
+        df,
+        test_size=0.15,
+        stratify=df["label_encoded"],
+        random_state=SEED
+    )
+
+    # 2. Dividir o restante entre Treino e Validação (85% restantes -> dividido novamente)
+    # Por exemplo, test_size=0.1764 de 85% resulta em ~15% de validação no total
+    train_df, val_df = train_test_split(
+        train_val_df,
+        test_size=0.1764, # Ajuste para ter proporções Treino(70) / Val(15) / Test(15)
+        stratify=train_val_df["label_encoded"],
+        random_state=SEED
+    )
+    
+    print(f"Total de imagens - Treino: {len(train_df)} | Validação: {len(val_df)} | Teste: {len(test_df)}")
+
+    # ----------------------------------------------------
+    # DataLoaders
+    # ----------------------------------------------------
+    g = torch.Generator()
+    g.manual_seed(SEED)
+
+    loader_train = DataLoader(
+        TypographyDataset(train_df, transform=base_transform),
+        batch_size=32,
+        shuffle=True,
+        generator=g
+    )
+
+    loader_val = DataLoader(
+        TypographyDataset(val_df, transform=base_transform),
+        batch_size=32,
+        shuffle=False
+    )
+
+    loader_test = DataLoader(
+        TypographyDataset(test_df, transform=base_transform),
+        batch_size=32,
+        shuffle=False
+    )
+
+    # ----------------------------------------------------
+    # Treinamento
+    # ----------------------------------------------------
+    model, train_time = train_dl_model(
+        "ResNet-18 (Final)",
+        loader_train,
+        loader_val,
+        epochs=30
+    )
+
+    # ----------------------------------------------------
+    # Avaliação
+    # ----------------------------------------------------
+    y_true = test_df["label_encoded"].values
+
+    result = evaluate_model(
+        model=model,
+        X_test=None,
+        class_names=class_names,
+        y_test=y_true,
+        model_type="pytorch",
+        test_loader=loader_test,
+        train_time=train_time
+    )
+
+    evaluate_all_models(
+        y_true=y_true,
+        predictions_dict={
+            "ResNet-18 (Final)": result
+        },
+        class_names=class_names,
+        save_prefix="final_test"
+    )
+    print("\n" + "=" * 70)
     print("TREINAMENTO FINAL")
     print("=" * 70)
 
@@ -386,7 +469,7 @@ def run_final_test(df):
 
     train_df, val_df = train_test_split(
         train_df,
-        test_size=0.1,
+        test_size=0.2,
         stratify=train_df["label_encoded"],
         random_state=SEED
     )
