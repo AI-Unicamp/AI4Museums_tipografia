@@ -160,5 +160,5 @@ if __name__ == "__main__":
     MODEL_PATH = "../scripts/weights/resnet18_final.pth"
     model = load_trained_model(MODEL_PATH)
     
-    process_and_visualize_page("OR64_02.jpg", model)
+    process_and_visualize_page("OR78_02.jpg", model)
     pass
