@@ -92,7 +92,7 @@ if __name__ == "__main__":
     meu_modelo = load_trained_model(MODEL_PATH)
     
     # Coloque o caminho de qualquer imagem aqui
-    imagem_teste = "test1.jpg"
+    imagem_teste = "letra_teste_1.png"
     
     print(f"\nAnalisando a imagem: {imagem_teste}")
     resultado, confianca, detalhes = predict_image(imagem_teste, meu_modelo)
