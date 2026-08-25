@@ -14,7 +14,7 @@ from PIL import Image
 from tqdm import tqdm
 
 ROOT_DIRECTORY = '../../data'
-SPLITS_CSV_PATH = ROOT_DIRECTORY + '/k-fold_split/typography_dataset_splits_local.csv'
+SPLITS_CSV_PATH = ROOT_DIRECTORY + '/k-fold_split/typography_dataset_splits.csv'
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Usando dispositivo: {device}")
@@ -222,49 +222,47 @@ def run_final_test(csv_path, batch_size=32, epochs=30):
     df['label_encoded'] = label_encoder.transform(df['label'])
 
     # ==========================================
-    # SEPARAÇÃO TREINO / TESTE FINAL
+    # SEPARAÇÃO TREINO / TESTE FINAL (10% TESTE)
     # ==========================================
+    from sklearn.model_selection import train_test_split
 
-    train_df = df[df['fold'] != -1].copy()
+    # Divide TODO o dataset: 90% para treino/validação, 10% para o teste final
+    train_val_df, test_df = train_test_split(
+        df,
+        test_size=0.10,
+        stratify=df['label_encoded'],
+        random_state=42
+    )
 
-    test_df = df[df['fold'] == -1].copy()
-
-    if test_df.empty:
-        raise ValueError("Nenhuma imagem encontrada no fold -1.")
-
-    if train_df.empty:
-        raise ValueError("Nenhuma imagem encontrada para treinamento.")
+    if test_df.empty or train_val_df.empty:
+        raise ValueError("Erro ao dividir o dataset. Verifique os dados de entrada.")
 
     expected_classes = set(classes)
     if set(test_df['label']) != expected_classes:
         print("\nAVISO: o conjunto de teste não contém todas as classes.")
 
-    print(f"\nImagens para treinamento: {len(train_df)}")
-    print(f"Imagens para teste final: {len(test_df)}")
-
-    print("\nDistribuição do treinamento:")
-    print(train_df['label'].value_counts())
-
-    print("\nDistribuição do teste:")
-    print(test_df['label'].value_counts())
+    print(f"\nImagens totais no CSV: {len(df)}")
+    print(f"Imagens reservadas para Teste (10%): {len(test_df)}")
+    print(f"Imagens para Treino/Validação (90%): {len(train_val_df)}")
 
     # ==========================================
     # SEPARAÇÃO TREINO / VALIDAÇÃO
     # ==========================================
-
-    from sklearn.model_selection import train_test_split
-
+    # Dos 90% restantes (train_val_df), separamos 10% para validação durante as épocas
     train_df, val_df = train_test_split(
-        train_df,
-        test_size=0.1,
-        stratify=train_df['label_encoded'],
+        train_val_df,
+        test_size=0.10,
+        stratify=train_val_df['label_encoded'],
         random_state=42
     )
 
-    print(f"\nApós separação:")
-    print(f"Treinamento: {len(train_df)}")
-    print(f"Validação:   {len(val_df)}")
-    print(f"Teste:       {len(test_df)}")
+    print(f"\nDistribuição Final:")
+    print(f"Treinamento: {len(train_df)} imagens")
+    print(f"Validação:   {len(val_df)} imagens")
+    print(f"Teste:       {len(test_df)} imagens")
+
+    print("\nDistribuição das classes no Teste:")
+    print(test_df['label'].value_counts())
 
     # ==========================================
     # DATASETS
@@ -354,7 +352,7 @@ def run_final_test(csv_path, batch_size=32, epochs=30):
         y_pred
     )
 
-    print(f"\nAccuracy final: {accuracy:.4f}")
+    print(f"\nAccuracy final no conjunto de Teste Inédito: {accuracy:.4f}")
 
     print("\nClassification Report:\n")
 
@@ -369,8 +367,7 @@ def run_final_test(csv_path, batch_size=32, epochs=30):
     )
 
     print(f"Tempo de treinamento: {training_time:.2f}s")
-
-    print(f"Tempo de inferência: {inference_time:.2f}s")
+    print(f"Tempo de inferência no teste: {inference_time:.2f}s")
 
     return model
 
