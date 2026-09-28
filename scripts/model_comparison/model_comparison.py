@@ -14,12 +14,14 @@ import re
 
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
+import torchvision.transforms.functional as TF
 from torchvision.models import resnet18, ResNet18_Weights
 from torchvision.models import efficientnet_b0, EfficientNet_B0_Weights
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
+from sklearn.utils.class_weight import compute_sample_weight
 from xgboost import XGBClassifier
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import classification_report, confusion_matrix, f1_score
 from tqdm import tqdm
 from skimage.feature import hog
 import random
@@ -71,13 +73,69 @@ base_transform = transforms.Compose([
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
+class RandomAffineBorderFill:
+    """
+    Transformação afim leve (rotação, translação, escala e cisalhamento pequenos)
+    que preenche as bordas reveladas com a COR MEDIANA DA BORDA da própria imagem.
+
+    O RandomAffine padrão preenche com preto (fill=0), o que cria cantos pretos
+    inexistentes nas letras reais (recortadas de papel cinza/amarelado) e gera
+    um viés artificial entre treino e inferência.
+    """
+    def __init__(self, degrees=5, translate=(0.05, 0.05), scale=(0.92, 1.08), shear=3, p=0.7):
+        self.degrees = (-degrees, degrees)
+        self.translate = translate
+        self.scale = scale
+        self.shear = (-shear, shear)
+        self.p = p
+
+    def __call__(self, img):
+        if random.random() > self.p:
+            return img
+
+        angle, translations, scale, shear = transforms.RandomAffine.get_params(
+            self.degrees, self.translate, self.scale, self.shear, list(img.size)
+        )
+
+        arr = np.asarray(img)
+        border = np.concatenate([arr[0], arr[-1], arr[:, 0], arr[:, -1]], axis=0)
+        fill = tuple(int(v) for v in np.median(border, axis=0))
+
+        return TF.affine(
+            img,
+            angle=angle,
+            translate=list(translations),
+            scale=scale,
+            shear=list(shear),
+            interpolation=transforms.InterpolationMode.BILINEAR,
+            fill=fill,
+        )
+
+
+class AddGaussianNoise:
+    """Ruído gaussiano aditivo sobre o tensor em [0, 1] (aplicar ANTES do Normalize)."""
+    def __init__(self, std=0.03, p=0.5):
+        self.std = std
+        self.p = p
+
+    def __call__(self, tensor):
+        if random.random() > self.p:
+            return tensor
+        return (tensor + torch.randn_like(tensor) * self.std).clamp(0.0, 1.0)
+
+
+# Augmentation que preserva a geometria tipográfica:
+#  - SEM flips (horizontal/vertical): espelhar 'b'/'d', 'p'/'q', itálicos etc. gera ruído de rótulo.
+#  - SEM RandomResizedCrop: ele altera a proporção (aspect ratio) do recorte e pode cortar
+#    serifas — justamente o tipo de distorção que já vimos causar desvio treino/inferência.
+#  - Resize((224, 224)) PRIMEIRO, idêntico ao base_transform, para o modelo ver a mesma
+#    geometria base e as variações serem apenas pequenas perturbações em torno dela.
 train_transform_aug = transforms.Compose([
-    transforms.Resize((256, 256)), 
-    transforms.RandomHorizontalFlip(p=0.5),
-    transforms.RandomRotation(degrees=15), 
-    transforms.RandomResizedCrop(size=224, scale=(0.8, 1.0)), 
-    transforms.ColorJitter(brightness=0.3, contrast=0.3), 
+    transforms.Resize((224, 224)),
+    RandomAffineBorderFill(degrees=5, translate=(0.05, 0.05), scale=(0.92, 1.08), shear=3, p=0.7),
+    transforms.ColorJitter(brightness=0.2, contrast=0.2),
     transforms.ToTensor(),
+    AddGaussianNoise(std=0.03, p=0.5),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
@@ -123,7 +181,27 @@ def extract_classical_features(dataframe, target_size=(64, 64), method="hog"):
 # =========================================================
 # 3. TREINAMENTO DE DEEP LEARNING (AS CONFIGURAÇÕES EXATAS)
 # =========================================================
-def train_dl_model(config_name, train_loader, val_loader, num_classes=4, epochs=10, patience=5):
+def compute_class_weights(train_df, num_classes, power=1.0):
+    """
+    Pesos inversamente proporcionais à frequência de cada classe NO TREINO DO FOLD:
+        w_c = (N / (K * n_c)) ** power
+    (power=1.0 equivale ao 'balanced' do scikit-learn; power=0.5 dá uma ponderação
+    mais suave, útil se a loss ficar instável com a classe rara.)
+    """
+    counts = np.bincount(train_df["label_encoded"].values, minlength=num_classes).astype(float)
+    weights = (counts.sum() / (num_classes * np.maximum(counts, 1.0))) ** power
+    return torch.tensor(weights, dtype=torch.float32)
+
+
+def train_dl_model(config_name, train_loader, val_loader, num_classes=4, epochs=10, patience=5,
+                   class_weights=None, selection_metric="macro_f1"):
+    """
+    class_weights: tensor (num_classes,) com os pesos da entropia cruzada (ou None).
+    selection_metric: métrica de validação usada para escolher o melhor checkpoint,
+        reduzir o LR e disparar o early stopping. 'macro_f1' (padrão) ou 'accuracy'.
+        Com classes desbalanceadas, escolher por acurácia favorece a classe majoritária
+        e anula o efeito da loss ponderada.
+    """
     print(f"\nTreinando {config_name} por {epochs} épocas...")
     
     if "ResNet" in config_name:
@@ -144,9 +222,18 @@ def train_dl_model(config_name, train_loader, val_loader, num_classes=4, epochs=
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.1, patience=2)
 
     model = model.to(device)
-    criterion = nn.CrossEntropyLoss()
 
-    best_acc = -float("inf")
+    if class_weights is not None:
+        print(f"Pesos de classe na loss: {[round(w, 3) for w in class_weights.tolist()]}")
+        class_weights = class_weights.to(device)
+
+    # Loss de treino ponderada; loss de validação SEM pesos (só para monitoramento/comparabilidade).
+    # Obs.: com pesos, o "Train Loss" exibido é uma média aproximada (o PyTorch normaliza pela soma
+    # dos pesos de cada lote) — serve apenas para acompanhar a curva.
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    eval_criterion = nn.CrossEntropyLoss()
+
+    best_score = -float("inf")
     best_weights = copy.deepcopy(model.state_dict())
     best_epoch = 0
 
@@ -171,11 +258,12 @@ def train_dl_model(config_name, train_loader, val_loader, num_classes=4, epochs=
         # -----------------------------
         # Validação
         # -----------------------------
-        val_loss, val_acc = evaluate(model, val_loader, criterion)
-        scheduler.step(val_acc)
+        val_loss, val_acc, val_f1 = evaluate(model, val_loader, eval_criterion, num_classes)
+        val_score = val_f1 if selection_metric == "macro_f1" else val_acc
+        scheduler.step(val_score)
 
-        if val_acc >= best_acc:
-            best_acc = val_acc
+        if val_score >= best_score:
+            best_score = val_score
             best_weights = copy.deepcopy(model.state_dict())
             best_epoch = epoch + 1
             epochs_without_improvement = 0
@@ -186,7 +274,8 @@ def train_dl_model(config_name, train_loader, val_loader, num_classes=4, epochs=
         "Train Loss": f"{epoch_loss:.4f}",
         "Val Loss": f"{val_loss:.4f}",
         "Val Acc": f"{val_acc:.4f}",
-        "Best": f"{best_acc:.4f}",
+        "Val F1": f"{val_f1:.4f}",
+        "Best": f"{best_score:.4f}",
         "LR": f"{optimizer.param_groups[0]['lr']:.1e}"
         })
 
@@ -195,7 +284,7 @@ def train_dl_model(config_name, train_loader, val_loader, num_classes=4, epochs=
             break
         
     model.load_state_dict(best_weights)
-    print(f"\nMelhor acurácia de validação: {best_acc:.4f}")
+    print(f"\nMelhor {selection_metric} de validação: {best_score:.4f}")
     print(f"Melhor modelo salvo na época {best_epoch}")
 
     train_time = time.perf_counter() - train_start
@@ -257,19 +346,20 @@ def evaluate_model(model, X_test, class_names, y_test, model_type="sklearn", tes
     }
     
 
-def evaluate(model, loader, criterion):
+def evaluate(model, loader, criterion, num_classes=4):
     """
     Avalia o modelo em um DataLoader.
     Retorna:
         loss médio
         accuracy
+        macro-F1 (todas as classes contam igual; classe sem acerto entra com F1 = 0)
     """
 
     model.eval()
 
     running_loss = 0.0
-    correct = 0
-    total = 0
+    all_preds = []
+    all_labels = []
 
     with torch.no_grad():
 
@@ -286,14 +376,20 @@ def evaluate(model, loader, criterion):
 
             _, preds = torch.max(outputs, 1)
 
-            correct += (preds == labels).sum().item()
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
 
-            total += labels.size(0)
+    all_preds = np.array(all_preds)
+    all_labels = np.array(all_labels)
 
-    loss = running_loss / total
-    accuracy = correct / total
+    loss = running_loss / len(all_labels)
+    accuracy = float((all_preds == all_labels).mean())
+    macro_f1 = f1_score(
+        all_labels, all_preds,
+        labels=np.arange(num_classes), average="macro", zero_division=0
+    )
 
-    return loss, accuracy
+    return loss, accuracy, macro_f1
 
 # =========================================================
 # 4. AVALIAÇÃO E GERAÇÃO DOS GRÁFICOS (PARA O LATEX)
@@ -439,15 +535,140 @@ def evaluate_all_models(y_true, predictions_dict, class_names, save_prefix=""):
 
     return df_results
 
+# =========================================================
+# 5. VERIFICAÇÃO DOS FOLDS E RESULTADOS AGREGADOS
+# =========================================================
+def check_fold_coverage(df, class_names):
+    """Falha cedo se algum fold estiver sem exemplos de alguma classe."""
+    table = pd.crosstab(df["fold"], df["label"]).reindex(columns=class_names, fill_value=0)
+    print("\nImagens por classe em cada fold:")
+    print(table.to_string())
+    if (table.values == 0).any():
+        raise ValueError(
+            "Há folds sem nenhuma imagem de alguma classe (ver tabela acima). "
+            "Regenere o CSV com dataset_split_kfold.py antes de rodar a validação cruzada."
+        )
+
+
+def _draw_confusion(ax, cm, cm_norm, class_names, title):
+    """Heatmap normalizado por linha (recall por classe) anotado com % e contagem."""
+    annot = np.empty(cm.shape, dtype=object)
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            annot[i, j] = f"{cm_norm[i, j] * 100:.1f}%\n(n={cm[i, j]})"
+
+    sns.heatmap(
+        cm_norm,
+        annot=annot,
+        fmt="",
+        cmap="Blues",
+        vmin=0.0,
+        vmax=1.0,
+        xticklabels=class_names,
+        yticklabels=class_names,
+        cbar=False,
+        ax=ax
+    )
+    ax.set_title(title)
+    ax.set_xlabel("Predição")
+    ax.set_ylabel("Classe verdadeira")
+
+
+def report_aggregated_results(oof_true, oof_preds, class_names, results_dir=Path("../../results")):
+    """
+    Junta as predições dos 5 folds de teste (cada imagem é testada exatamente uma vez,
+    então o conjunto agregado cobre o dataset inteiro, sem sobreposição) e gera:
+      - matriz de confusão agregada NORMALIZADA por linha (PDF em grade + um PDF por modelo);
+      - contagens brutas da matriz (CSV);
+      - classification report agregado por modelo (CSV) e resumo comparativo (CSV).
+    """
+    results_dir = Path(results_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    y_true = np.concatenate(oof_true)
+    labels = np.arange(len(class_names))
+    summary_rows = []
+
+    n_models = len(oof_preds)
+    n_cols = 3
+    n_rows = int(np.ceil(n_models / n_cols))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(7 * n_cols, 5.5 * n_rows))
+    axes = np.atleast_1d(axes).flatten()
+
+    for ax, (model_name, pred_list) in zip(axes, oof_preds.items()):
+        y_pred = np.concatenate(pred_list)
+        assert len(y_pred) == len(y_true), f"Tamanhos diferentes em '{model_name}'"
+
+        cm = confusion_matrix(y_true, y_pred, labels=labels)
+        cm_norm = confusion_matrix(y_true, y_pred, labels=labels, normalize="true")
+
+        safe_name = re.sub(r"[^\w]+", "_", model_name).strip("_")
+
+        # Contagens brutas (para tabelas no LaTeX)
+        pd.DataFrame(cm, index=class_names, columns=class_names).to_csv(
+            results_dir / f"aggregated_{safe_name}_confusion_counts.csv"
+        )
+
+        # Classification report agregado
+        report = classification_report(
+            y_true, y_pred, labels=labels, target_names=class_names,
+            output_dict=True, zero_division=0
+        )
+        pd.DataFrame(report).transpose().round(4).to_csv(
+            results_dir / f"aggregated_{safe_name}_classification_report.csv"
+        )
+        summary_rows.append({
+            "Model": model_name,
+            "Accuracy": report["accuracy"],
+            "Macro F1": report["macro avg"]["f1-score"],
+            "Weighted F1": report["weighted avg"]["f1-score"],
+            "Fantasy Recall": report["fantasia"]["recall"],
+            "N": len(y_true),
+        })
+
+        # Painel na grade
+        _draw_confusion(ax, cm, cm_norm, class_names, model_name)
+
+        # Figura individual (para o relatório)
+        fig_single, ax_single = plt.subplots(figsize=(7, 5.5))
+        _draw_confusion(ax_single, cm, cm_norm, class_names, f"{model_name} — agregado (5 folds)")
+        fig_single.tight_layout()
+        fig_single.savefig(results_dir / f"aggregated_{safe_name}_confusion.pdf",
+                           format="pdf", bbox_inches="tight")
+        plt.close(fig_single)
+
+    for ax in axes[n_models:]:
+        ax.axis("off")
+
+    fig.suptitle("Matrizes de confusão agregadas (5 folds de teste, normalizadas por classe verdadeira)",
+                 fontsize=14)
+    fig.tight_layout()
+    fig.savefig(results_dir / "aggregated_confusion_all_models.pdf", format="pdf", bbox_inches="tight")
+    plt.close(fig)
+
+    summary = pd.DataFrame(summary_rows)
+    summary.to_csv(results_dir / "aggregated_summary.csv", index=False)
+
+    print("\n===== RESULTADOS AGREGADOS (predições dos 5 folds de teste juntas) =====")
+    print(summary.round(4).to_string(index=False))
+    print(f"\nArquivos 'aggregated_*' salvos em {results_dir.resolve()}")
+    return summary
+
+
 def run_cross_validation(df, n_folds=5):
 
+    class_names = sorted(df["label"].unique())
+    check_fold_coverage(df, class_names)
+
     all_results = []
+    oof_true = []      # y_true de cada fold de teste, na ordem
+    oof_preds = {}     # modelo -> lista de predições de cada fold de teste
 
     for test_fold in range(n_folds):
 
         val_fold = (test_fold + 1) % n_folds
         
-        fold_results = run_fold(
+        fold_results, y_true_fold, fold_preds = run_fold(
             df,
             test_fold=test_fold,
             val_fold=val_fold
@@ -456,6 +677,10 @@ def run_cross_validation(df, n_folds=5):
         fold_results["Test_Fold"] = test_fold
         fold_results["Val_Fold"] = val_fold
         all_results.append(fold_results)
+
+        oof_true.append(np.asarray(y_true_fold))
+        for model_name, result in fold_preds.items():
+            oof_preds.setdefault(model_name, []).append(np.asarray(result["predictions"]))
 
     results = pd.concat(all_results, ignore_index=True)
 
@@ -476,6 +701,9 @@ def run_cross_validation(df, n_folds=5):
 
     summary.to_csv("cross_validation_summary.csv")
 
+    # Matriz de confusão e métricas agregadas sobre todo o dataset (fora-da-amostra)
+    report_aggregated_results(oof_true, oof_preds, class_names)
+
     return results, summary
 
 def run_fold(df, val_fold, test_fold=-1):
@@ -493,6 +721,10 @@ def run_fold(df, val_fold, test_fold=-1):
     test_df = df[df["fold"] == test_fold].copy()
 
     class_names = sorted(df["label"].unique())
+    num_classes = len(class_names)
+
+    # Pesos de classe calculados só com o TREINO deste fold (sem vazar val/teste)
+    class_weights = compute_class_weights(train_df, num_classes)
 
     # --- PREPARANDO LOADERS DE IMAGENS ---
             # Para testes e modelos sem augmentation
@@ -530,9 +762,15 @@ def run_fold(df, val_fold, test_fold=-1):
     print("\n--- PREPARANDO MACHINE LEARNING CLÁSSICO ---")
     X_train, y_train = extract_classical_features(train_df, target_size=(64, 64), method='hog')
     X_test, y_true_test = extract_classical_features(test_df, target_size=(64, 64), method='hog')
+    # Garante alinhamento com as predições dos loaders (imagens ilegíveis quebrariam isso)
+    assert len(y_true_test) == len(test_df), (
+        "Alguma imagem de teste não pôde ser lida por cv2.imread; "
+        "y_true e as predições dos modelos de DL ficariam desalinhados."
+    )
 
     print("Treinando Random Forest...")
-    rf = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1, verbose=0)
+    rf = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1, verbose=0,
+                                class_weight="balanced")
     start = time.perf_counter()
     rf.fit(X_train, y_train)
     train_time = time.perf_counter() - start
@@ -547,7 +785,7 @@ def run_fold(df, val_fold, test_fold=-1):
     print("Treinando XGBoost...")
     xgb = XGBClassifier(n_estimators=100, learning_rate=0.1, max_depth=6, random_state=42, n_jobs=-1)
     start = time.perf_counter()
-    xgb.fit(X_train, y_train)
+    xgb.fit(X_train, y_train, sample_weight=compute_sample_weight("balanced", y_train))
     train_time = time.perf_counter() - start
     model_preds['2. XGBoost'] = evaluate_model(
         xgb,
@@ -559,7 +797,8 @@ def run_fold(df, val_fold, test_fold=-1):
     )
     # --- 3. RESNET-18 (SEM AUG, 10 ÉPOCAS) ---
     print("\n--- INICIANDO DEEP LEARNING ---")
-    res_base, train_time = train_dl_model('3. ResNet-18 (Base)', loader_base_train, loader_val, epochs=30)
+    res_base, train_time = train_dl_model('3. ResNet-18 (Base)', loader_base_train, loader_val, epochs=30,
+                                         num_classes=num_classes, class_weights=class_weights)
     model_preds["3. ResNet-18 (Base)"] = evaluate_model(
         res_base,
         None,
@@ -570,7 +809,8 @@ def run_fold(df, val_fold, test_fold=-1):
         train_time=train_time
     ) 
     # --- 4. RESNET-18 (COM AUG, 40 ÉPOCAS) ---
-    res_aug, train_time = train_dl_model('4. ResNet-18 (Aug)', loader_aug_train, loader_val, epochs=40)
+    res_aug, train_time = train_dl_model('4. ResNet-18 (Aug)', loader_aug_train, loader_val, epochs=40,
+                                         num_classes=num_classes, class_weights=class_weights)
     model_preds["4. ResNet-18 (Aug)"] = evaluate_model(
         res_aug,
         None,
@@ -581,7 +821,8 @@ def run_fold(df, val_fold, test_fold=-1):
         train_time=train_time
     )
     # --- 5. EFFICIENTNET-B0 (SEM AUG, 10 ÉPOCAS) ---
-    eff_base, train_time = train_dl_model('5. EfficientNet (Base)', loader_base_train, loader_val, epochs=30)
+    eff_base, train_time = train_dl_model('5. EfficientNet (Base)', loader_base_train, loader_val, epochs=30,
+                                         num_classes=num_classes, class_weights=class_weights)
     model_preds["5. EfficientNet (Base)"] = evaluate_model(
         eff_base,
         None,
@@ -593,7 +834,8 @@ def run_fold(df, val_fold, test_fold=-1):
     )
     # --- 6. EFFICIENTNET-B0 (COM AUG, 40 ÉPOCAS) ---
     # Assumi 40 épocas para igualar com a ResNet com augmentation
-    eff_aug, train_time = train_dl_model('6. EfficientNet (Aug)', loader_aug_train, loader_val, epochs=45)
+    eff_aug, train_time = train_dl_model('6. EfficientNet (Aug)', loader_aug_train, loader_val, epochs=45,
+                                         num_classes=num_classes, class_weights=class_weights)
     model_preds["6. EfficientNet (Aug)"] = evaluate_model(
         eff_aug,
         None,
@@ -604,7 +846,8 @@ def run_fold(df, val_fold, test_fold=-1):
         train_time=train_time
     )
     # --- CONFRONTO FINAL ---
-    return evaluate_all_models(y_true_test, model_preds, class_names, save_prefix=f"test_fold{test_fold}")
+    df_results = evaluate_all_models(y_true_test, model_preds, class_names, save_prefix=f"test_fold{test_fold}")
+    return df_results, y_true_test, model_preds
 
 
 if __name__ == "__main__":
