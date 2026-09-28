@@ -5,7 +5,6 @@ import torch
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import matplotlib.colors as mcolors
-from skimage import measure
 from PIL import Image
 from torchvision import models, transforms
 
@@ -16,10 +15,10 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 CLASSES = ['escritural', 'fantasia', 'grotesco', 'serifado']
 
-# O esquema de cores que você definiu
+# O esquema de cores definido
 COLOR_MAP = {
-    'escritural': 'yellow',
     'grotesco': 'blue',
+    'escritural': 'yellow',
     'serifado': 'red',
     'fantasia': 'green'
 }
@@ -69,7 +68,7 @@ def predict_cropped_image(pil_img, model):
 def process_and_visualize_page(image_path, model):
     print(f"\nAnalisando a página: {image_path}")
     
-    # 1. Carrega as imagens (RGB para o plot final/ResNet, e Grayscale para o OpenCV)
+    # 1. Carrega as imagens
     original_bgr = cv.imread(image_path)
     if original_bgr is None:
         print("Erro ao carregar a imagem.")
@@ -77,60 +76,59 @@ def process_and_visualize_page(image_path, model):
         
     original_rgb = cv.cvtColor(original_bgr, cv.COLOR_BGR2RGB)
     img_gray = cv.cvtColor(original_bgr, cv.COLOR_BGR2GRAY)
+    img_h, img_w = original_rgb.shape[:2]
     
-    # 2. Pré-processamento (Filtro e Binarização)
-    blur = cv.medianBlur(img_gray, 15)
-    _, binarized = cv.threshold(blur, 127, 255, cv.THRESH_BINARY)
-    
-    # 3. Fechamento Morfológico
+    # 2. Binarização simples (igual ao treino)
+    _, binarized = cv.threshold(img_gray, 127, 255, cv.THRESH_BINARY)
+
+    # 3. Fechamento morfológico (igual ao treino — kernel 21x21)
+    kernel = np.ones((11, 11), np.uint8)
     img_inverted = 255 - binarized
-    kernel = np.ones((7, 7), np.uint8)
     closing_result = cv.morphologyEx(img_inverted, cv.MORPH_CLOSE, kernel)
-    final_mask = 255 - closing_result
-    
-    # 4. Encontrar Componentes Conectados
-    labeled_img, num_labels = measure.label(final_mask, connectivity=2, background=255, return_num=True)
+    morph_closed = 255 - closing_result
+
+    # 4. Rotulação por componentes conexas (igual ao treino — skimage)
+    from skimage import measure
+    labeled_img, num_labels = measure.label(morph_closed, connectivity=2, background=255, return_num=True)
     props = measure.regionprops(labeled_img)
-    
-    # 5. Configurar o Plot
+    # 4. Configurar o Plot
     fig, ax = plt.subplots(figsize=(12, 16))
     ax.imshow(original_rgb)
     ax.axis('off')
     
     count_valid_letters = 0
     
-    # 6. Iterar sobre cada Bounding Box
-    for i in range(num_labels):
-        bbox = props[i].bbox
-        min_row, min_col, max_row, max_col = bbox
-        
-        # Ignora caixas muito pequenas
-        if (max_row - min_row) * (max_col - min_col) < 100:
+    # 5. Iterar sobre cada Bounding Box
+    for region in props:
+        bbox = region.bbox  # (min_row, min_col, max_row, max_col)
+        y1, x1, y2, x2 = bbox[0], bbox[1], bbox[2], bbox[3]
+        h = y2 - y1
+        w = x2 - x1
+
+        if w * h < 100 or h > img_h * 0.5:
             continue
-            
-        count_valid_letters += 1
-        
-        # Recorta a letra da imagem RGB original para enviar à ResNet
-        cropped_letter_array = original_rgb[min_row:max_row, min_col:max_col]
+
+        # Sem padding adicional — o fechamento morfológico já deu "respiro"
+        # Se quiser padding, aplique aqui de forma fixa (ex: 5px fixos, não proporcional)
+        cropped_letter_array = original_rgb[y1:y2, x1:x2]
+        if cropped_letter_array.size == 0:
+            continue
+
         pil_letter = Image.fromarray(cropped_letter_array)
-        
-        # 7. Inferência
         pred_class, confidence = predict_cropped_image(pil_letter, model)
-        
+
+
         # 8. Desenhar o Bounding Box
         base_color = COLOR_MAP[pred_class]
         alpha_val = max(0.15, confidence / 100.0) # Garante que a caixa nunca suma 100% (mínimo 15% de opacidade)
         
-        # Cria a cor com o canal alpha aplicado (transparência baseada na confiança)
         edge_color_with_alpha = mcolors.to_rgba(base_color, alpha=alpha_val)
-        
-        # Uma sacada legal: preencher a caixa com a mesma cor, mas bem mais transparente
         face_color_with_alpha = mcolors.to_rgba(base_color, alpha=alpha_val * 0.2)
         
         rect = patches.Rectangle(
-            (min_col, min_row), 
-            max_col - min_col, 
-            max_row - min_row,
+            (x1, y1), 
+            x2 - x1, 
+            y2 - y1,
             linewidth=2, 
             edgecolor=edge_color_with_alpha, 
             facecolor=face_color_with_alpha
@@ -142,7 +140,6 @@ def process_and_visualize_page(image_path, model):
     # 9. Criar a Legenda
     legend_patches = []
     for cls_name, color in COLOR_MAP.items():
-        # Cria um retângulo dummy só para a legenda
         patch = patches.Patch(color=color, label=cls_name.capitalize())
         legend_patches.append(patch)
         
@@ -157,8 +154,11 @@ def process_and_visualize_page(image_path, model):
 # 4. TESTANDO O SCRIPT
 # ==========================================
 if __name__ == "__main__":
-    MODEL_PATH = "../scripts/weights/resnet18_final.pth"
-    model = load_trained_model(MODEL_PATH)
+    # Certifique-se de que o caminho dos pesos do modelo está correto
+    MODEL_PATH = "weights/resnet18_final.pth"
     
-    process_and_visualize_page("OR64_02.jpg", model)
-    pass
+    if os.path.exists(MODEL_PATH):
+        model = load_trained_model(MODEL_PATH)
+        process_and_visualize_page("OR64_02.jpg", model)
+    else:
+        print(f"Pesos do modelo não encontrados em: {MODEL_PATH}")
