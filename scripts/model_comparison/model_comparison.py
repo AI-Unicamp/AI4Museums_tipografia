@@ -303,7 +303,8 @@ def predict_dl_model(model, test_loader):
     return np.array(all_preds)
 
 
-def evaluate_model(model, X_test, class_names, y_test, model_type="sklearn", test_loader=None, train_time=None):
+def evaluate_model(model, X_test, class_names, y_test, model_type="sklearn", test_loader=None, train_time=None,
+                   feature_time=0.0):
     """
     Avalia um modelo treinado.
     """
@@ -321,7 +322,10 @@ def evaluate_model(model, X_test, class_names, y_test, model_type="sklearn", tes
             "model_type deve ser 'sklearn' ou 'pytorch'."
         )
 
-    inference_time = time.perf_counter() - start
+    # Para os modelos clássicos, `feature_time` é o tempo de leitura + resize + HOG das imagens de teste,
+    # que acontece fora do predict(). Somamos aqui para ficar comparável ao tempo dos modelos de DL,
+    # cujo predict_dl_model já inclui leitura do disco e transformações via DataLoader.
+    inference_time = (time.perf_counter() - start) + feature_time
 
     report = classification_report(
         y_test,
@@ -760,8 +764,18 @@ def run_fold(df, val_fold, test_fold=-1):
     model_preds = {}
     # --- 1 & 2. MACHINE LEARNING CLÁSSICO ---
     print("\n--- PREPARANDO MACHINE LEARNING CLÁSSICO ---")
+    # Tempo da extração (leitura + resize + HOG) é medido e somado aos tempos dos modelos clássicos.
+    # A extração é feita uma vez e compartilhada por RF e XGBoost; cada um paga o custo inteiro,
+    # já que nenhum funcionaria sem ela.
+    t0 = time.perf_counter()
     X_train, y_train = extract_classical_features(train_df, target_size=(64, 64), method='hog')
+    train_feat_time = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
     X_test, y_true_test = extract_classical_features(test_df, target_size=(64, 64), method='hog')
+    test_feat_time = time.perf_counter() - t0
+    print(f"Extração de HOG: treino {train_feat_time:.2f} s ({len(train_df)} imgs) | "
+          f"teste {test_feat_time:.2f} s ({len(test_df)} imgs)")
     # Garante alinhamento com as predições dos loaders (imagens ilegíveis quebrariam isso)
     assert len(y_true_test) == len(test_df), (
         "Alguma imagem de teste não pôde ser lida por cv2.imread; "
@@ -773,27 +787,33 @@ def run_fold(df, val_fold, test_fold=-1):
                                 class_weight="balanced")
     start = time.perf_counter()
     rf.fit(X_train, y_train)
-    train_time = time.perf_counter() - start
+    fit_time = time.perf_counter() - start
+    train_time = train_feat_time + fit_time
+    print(f"Random Forest: fit {fit_time:.2f} s + extração HOG {train_feat_time:.2f} s = {train_time:.2f} s")
     model_preds['1. Random Forest'] = evaluate_model(
         rf,
         X_test,
         class_names,
         y_true_test,
         model_type="sklearn",
-        train_time=train_time
+        train_time=train_time,
+        feature_time=test_feat_time
     )
     print("Treinando XGBoost...")
     xgb = XGBClassifier(n_estimators=100, learning_rate=0.1, max_depth=6, random_state=42, n_jobs=-1)
     start = time.perf_counter()
     xgb.fit(X_train, y_train, sample_weight=compute_sample_weight("balanced", y_train))
-    train_time = time.perf_counter() - start
+    fit_time = time.perf_counter() - start
+    train_time = train_feat_time + fit_time
+    print(f"XGBoost: fit {fit_time:.2f} s + extração HOG {train_feat_time:.2f} s = {train_time:.2f} s")
     model_preds['2. XGBoost'] = evaluate_model(
         xgb,
         X_test,
         class_names,
         y_true_test,
         model_type="sklearn",
-        train_time=train_time
+        train_time=train_time,
+        feature_time=test_feat_time
     )
     # --- 3. RESNET-18 (SEM AUG, 10 ÉPOCAS) ---
     print("\n--- INICIANDO DEEP LEARNING ---")
