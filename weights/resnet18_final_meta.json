@@ -1,0 +1,39 @@
+{
+  "architecture": "resnet18",
+  "num_classes": 4,
+  "class_names": [
+    "escritural",
+    "fantasia",
+    "grotesco",
+    "serifado"
+  ],
+  "input_size": [
+    224,
+    224
+  ],
+  "normalize_mean": [
+    0.485,
+    0.456,
+    0.406
+  ],
+  "normalize_std": [
+    0.229,
+    0.224,
+    0.225
+  ],
+  "input_mode": "grayscale_replicated_to_rgb",
+  "weights_file": "resnet18_final.pth",
+  "seed": 42,
+  "best_epoch": 14,
+  "split": {
+    "by_drawer": true,
+    "train": 1040,
+    "val": 214,
+    "test": 210
+  },
+  "test_metrics": {
+    "accuracy": 0.7619047619047619,
+    "macro_f1": 0.5769477911646587,
+    "fantasy_recall": 0.0
+  }
+}
