@@ -404,7 +404,7 @@ def evaluate_all_models(y_true, predictions_dict, class_names, save_prefix=""):
     print("GERANDO RESULTADOS COMPARATIVOS")
     print("=" * 60)
 
-    results_dir = Path("../../results")
+    results_dir = Path("results")
     results_dir.mkdir(parents=True, exist_ok=True)
 
     save_prefix = results_dir / save_prefix
@@ -578,7 +578,7 @@ def _draw_confusion(ax, cm, cm_norm, class_names, title):
     ax.set_ylabel("Classe verdadeira")
 
 
-def report_aggregated_results(oof_true, oof_preds, class_names, results_dir=Path("../../results")):
+def report_aggregated_results(oof_true, oof_preds, class_names, results_dir=Path("results")):
     """
     Junta as predições dos 5 folds de teste (cada imagem é testada exatamente uma vez,
     então o conjunto agregado cobre o dataset inteiro, sem sobreposição) e gera:
@@ -688,7 +688,7 @@ def run_cross_validation(df, n_folds=5):
 
     results = pd.concat(all_results, ignore_index=True)
 
-    results.to_csv("cross_validation_results.csv", index=False
+    results.to_csv("results/cross_validation_results.csv", index=False
     )
 
     summary = (
@@ -703,7 +703,7 @@ def run_cross_validation(df, n_folds=5):
     print("\n===== MÉDIAS DOS 5 FOLDS =====")
     print(summary)
 
-    summary.to_csv("cross_validation_summary.csv")
+    summary.to_csv("results/cross_validation_summary.csv")
 
     # Matriz de confusão e métricas agregadas sobre todo o dataset (fora-da-amostra)
     report_aggregated_results(oof_true, oof_preds, class_names)
@@ -871,7 +871,7 @@ def run_fold(df, val_fold, test_fold=-1):
 
 
 if __name__ == "__main__":
-    SPLITS_CSV_PATH = "../../data/k-fold_split/typography_dataset_splits.csv"
+    SPLITS_CSV_PATH = "data/k-fold_split/typography_dataset_splits.csv"
     df = pd.read_csv(SPLITS_CSV_PATH)
 
     le = LabelEncoder()

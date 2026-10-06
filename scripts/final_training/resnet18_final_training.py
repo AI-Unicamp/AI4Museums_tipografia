@@ -7,9 +7,9 @@ Configuração do modelo = a do "3. ResNet-18 (Base)" do model_comparison.py:
   checkpoint escolhido pelo Macro-F1 de validação.
 
 Saídas:
-  ../../weights/resnet18_final.pth        state_dict (torch.load + load_state_dict)
-  ../../weights/resnet18_final_meta.json  ordem das classes, pré-processamento, métricas de teste
-  ../../results/final_test_*              métricas, matriz de confusão, predições por imagem, split usado
+  weights/resnet18_final.pth        state_dict (torch.load + load_state_dict)
+  weights/resnet18_final_meta.json  ordem das classes, pré-processamento, métricas de teste
+  results/final_test_*              métricas, matriz de confusão, predições por imagem, split usado
 """
 import copy
 import json
@@ -40,9 +40,9 @@ from tqdm import tqdm
 # =========================================================
 SEED = 42
 
-SPLITS_CSV_PATH = "../../data/k-fold_split/typography_dataset_splits.csv"
-RESULTS_DIR = Path("../../results")
-WEIGHTS_DIR = Path("../../weights")
+SPLITS_CSV_PATH = "data/k-fold_split/typography_dataset_splits.csv"
+RESULTS_DIR = Path("results")
+WEIGHTS_DIR = Path("weights")
 WEIGHTS_NAME = "resnet18_final"
 
 EPOCHS = 30
@@ -525,7 +525,7 @@ def run_final_test(df):
     for name in ["final_test_split.csv", "final_test_classification_report.csv",
                  "final_test_confusion_counts.csv", "final_test_confusion.pdf",
                  "final_test_predictions.csv", "final_test_benchmark_results.csv"]:
-        print(f"  • {name}")
+        print(f"  - {name}")
 
 
 if __name__ == "__main__":

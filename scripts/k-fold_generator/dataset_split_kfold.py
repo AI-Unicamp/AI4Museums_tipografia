@@ -7,11 +7,8 @@ from sklearn.model_selection import StratifiedGroupKFold
 # ==========================================
 # CONFIGURAÇÕES DE DIRETÓRIO
 # ==========================================
-# Descomente e ajuste as montagens se estiver no Colab:
-# from google.colab import drive
-# drive.mount('/content/data', force_remount=True)
 
-ROOT_DIRECTORY = '../../data'
+ROOT_DIRECTORY = 'data'
 IMAGES_DIRECTORY = ROOT_DIRECTORY + '/processed'
 SPLITS_CSV_PATH = ROOT_DIRECTORY + '/k-fold_split/typography_dataset_splits.csv'
 
@@ -75,7 +72,7 @@ def _imbalance_score(counts, class_totals, n_splits):
 def prepare_grouped_dataset_splits(dataset_dir, n_splits=5, random_state=42,
                                    min_per_class_per_fold=1, max_attempts=500):
     """
-    Divide TODO o conjunto em K folds com:
+    Divide todo o conjunto em K folds com:
       - agrupamento por gaveta (a mesma gaveta nunca aparece em dois folds);
       - estratificação por classe (StratifiedGroupKFold);
       - garantia de pelo menos `min_per_class_per_fold` imagens de CADA classe

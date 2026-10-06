@@ -7,13 +7,7 @@ Classifica recortes de letras em: escritural, fantasia, grotesco, serifado
 Uso na linha de comando:
     python resnet18_inference.py letra_teste_A.png
     python resnet18_inference.py pasta_com_letras/ --csv predicoes.csv
-    python resnet18_inference.py a.png b.png --weights ../../weights/resnet18_final.pth
-
-Uso como módulo (por exemplo, no pipeline de páginas, com recortes já em memória):
-    from resnet18_inference import load_trained_model, predict_pil
-    model, class_names = load_trained_model("../../weights/resnet18_final.pth")
-    resultado = predict_pil(pil_image, model, class_names)
-    # {'predicted': 'serifado', 'confidence': 93.2, 'probabilities': {...}}
+    python resnet18_inference.py a.png b.png --weights weights/resnet18_final.pth
 """
 import argparse
 import csv
@@ -29,7 +23,7 @@ from torchvision import models, transforms
 # =========================================================
 # CONFIGURAÇÕES
 # =========================================================
-DEFAULT_WEIGHTS = "../../weights/resnet18_final.pth"
+DEFAULT_WEIGHTS = "weights/resnet18_final.pth"
 # Usado apenas se o arquivo *_meta.json não existir ao lado dos pesos:
 FALLBACK_CLASSES = ['escritural', 'fantasia', 'grotesco', 'serifado']
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg'}
