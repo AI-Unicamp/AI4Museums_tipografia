@@ -70,7 +70,7 @@ source .venv/bin/activate
 
 Instale todos os pacotes Python utilizados para a implementação:
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 ### 1. Pré-processamento e Segmentação das Imagens
@@ -147,7 +147,7 @@ Resultados obtidos utilizando as mesmas configurações anteriores devem levar o
 
 Execução:
 ```bash 
-python3 scripts/final_training resnet18_final_training.py
+python3 scripts/final_training/resnet18_final_training.py
 ```
 
 As saídas geradas por esse script são:
