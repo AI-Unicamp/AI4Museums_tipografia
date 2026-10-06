@@ -1,4 +1,4 @@
-#!/home/heusmat/tipografia-museu-paulista/.venv/bin/python3
+#!/home/heusmat/Documents/IC_Museu_Paulista/tipografia-museu-paulista/.venv/bin/python3
 # -*- coding: utf-8 -*-
 import re
 import sys

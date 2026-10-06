@@ -1,5 +1,0 @@
-falhas no bd:
-grotesco 120 (A está apagado, inutilizável)
-grotesco 140 (não tem A)
-serifado 017 (sem A)
-serifado 029 (sem A)

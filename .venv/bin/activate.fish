@@ -33,7 +33,7 @@ end
 # Unset irrelevant variables.
 deactivate nondestructive
 
-set -gx VIRTUAL_ENV /home/heusmat/tipografia-museu-paulista/.venv
+set -gx VIRTUAL_ENV /home/heusmat/Documents/IC_Museu_Paulista/tipografia-museu-paulista/.venv
 
 set -gx _OLD_VIRTUAL_PATH $PATH
 set -gx PATH "$VIRTUAL_ENV/"bin $PATH
