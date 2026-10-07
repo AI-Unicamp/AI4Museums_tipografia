@@ -18,7 +18,7 @@ A abordagem utilizada envolveu **classificar impressões sobre papel de um únic
 ---
 ## Dataset
 
-A organização e documentação deste conjunto de dados seguem as diretrizes propostas pelo framework *Datasheets for Datasets* [Gebru et al, 2021](https://arxiv.org/abs/1803.09010), um padrão da comunidade de aprendizado de máquina que visa garantir transparência, facilitar a reprodutibilidade e ajudar os usuários a tomarem decisões informadas sobre o uso dos dados.
+A organização e documentação deste conjunto de dados seguem as diretrizes propostas pelo framework *Datasheets for Datasets* [(Gebru et al, 2021)](https://arxiv.org/abs/1803.09010), um padrão da comunidade de aprendizado de máquina que visa garantir transparência, facilitar a reprodutibilidade e ajudar os usuários a tomarem decisões informadas sobre o uso dos dados.
 
 O diretório local de dados foi estruturado separando claramente os estágios de processamento:
 
@@ -49,7 +49,7 @@ As instâncias que compõem o dataset representam recortes de imagens de caracte
 A adoção dos diretórios `raw`, `interim` e `processed` é inspirada no padrão *Cookiecutter Data Science*, seguindo uma lógica evolutiva das imagens:
 - `raw` corresponde aos dados brutos, isto é, as amostras fotográficas originais das impressões tipográficas e dados intocados, exatamente como foram digitalizados e categorizados inicialmente. Não deve ser modificado, sobrescrito ou apagado.
 - `interim` é a área de transição, em que localizam-se os dados que sofreram e/ou ainda sofrerão processamento computacional (filtragem, binarização e segmentação), antes da fase da validação humana. 
-- `processed` diz respeito aos dados finais e padronizados para alimentar os modelos de aprendizado de máquina na etapa seguinte. Consiste nos recortes individuais de caracteres, devidamente rotulados e validados por humanos como ideais para a tarefa de treinamento dos algoritmos. Um recorte é considerado "ideal" e, portanto, pertence a `processed` se (a) continha um caractere íntegro e legível, sem invasões de outros; (b) apresentava pequenas invasões de outros, mas que não geravam ambiguidade em seu reconhecimento; ou (c) se encaixava em algum dos outros dois casos, mesmo exibindo borrões ou leve desfoque. 
+- `processed` diz respeito aos dados finais e padronizados para alimentar os modelos de aprendizado de máquina na etapa seguinte. Consiste nos recortes individuais de caracteres, devidamente rotulados e validados por humanos como ideais para a tarefa de treinamento dos algoritmos. Um recorte é considerado "ideal" e, portanto, pertence a `processed` se (a) contém um caractere íntegro e legível, sem invasões de outros; (b) apresenta pequenas invasões de outros, mas que não geravam ambiguidade em seu reconhecimento; ou (c) se encaixa em algum dos outros dois casos, mesmo exibindo borrões ou leve desfoque. 
 
 Os dados brutos foram adquiridos diretamente de fotografias de impressões sobre papel de tipos metálicos provenientes de gavetas do Museu Paulista.
 
@@ -165,3 +165,8 @@ Alternativamente, caso queira mudar o arquivo de pesos:
 ```bash 
 python3 scripts/inference_models/resnet18_inference.py <nome_da_imagem [.png, .jpg, .jpeg]> --weights <caminho_pesos.pth>
 ```
+
+---
+## Agradecimentos
+Os autores agradecem à Profa. Solange Ferraz de Lima e ao Dr. Fabio Mariano Cruz Pereira, cujas contribuições foram essenciais à concepção e viabilização deste projeto, e à equipe do Museu Paulista (USP), cujo trabalho de curadoria, classificação e catalogação das gavetas tipográficas possibilitou a construção da base de dados utilizada neste estudo. Este trabalho recebeu apoio da FAPESP (2024/23738-0).
+
